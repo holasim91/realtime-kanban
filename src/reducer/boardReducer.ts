@@ -5,7 +5,7 @@ export const initialState: BoardState = {
   columnOrder: ['todo', 'doing', 'done'],
 }
 
-type Action = 
+export type Action = 
   | { type: 'MOVE_CARD'; cardId: string; toColumn: string, order:number,  updatedAt:number} 
   | { type: 'HYDRATE'; cards: Record<string, Card> }  
   | { type: 'ADD_CARD'; card: Card } 
