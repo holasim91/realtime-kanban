@@ -7,119 +7,18 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { useDroppable } from '@dnd-kit/core'
-import { useDraggable } from '@dnd-kit/core'
 import { type RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
-import type { Card } from './lib/type'
+import type { BoardState, Card } from './lib/type'
 import { loadCards } from './lib/card'
-
-// ── 데이터 구조 (옵션 2: flat) ──────────────────────────────
-type BoardState = {
-  cards: Record<string, Card>
-  columnOrder: string[]
-}
-
-const initialState: BoardState = {
-  cards: {},
-  columnOrder: ['todo', 'doing', 'done'],
-}
-
-// ── reducer ─────────────────────────────────────────────────
-type Action = 
-  | { type: 'MOVE_CARD'; cardId: string; toColumn: string, order:number,  updatedAt:number} 
-   | { type: 'HYDRATE'; cards: Record<string, Card> }  
-
-function boardReducer(state: BoardState, action: Action): BoardState {
-  switch (action.type) {
-    case 'MOVE_CARD': {
-      const originalColumnId = state.cards[action.cardId].columnId
-      const originalUpdatedAt = state.cards[action.cardId].updatedAt
-      if(originalColumnId === action.toColumn || originalUpdatedAt >= action.updatedAt){
-        return state
-      }else{
-        const taregetOrder = Object.values(state.cards).filter(c => c.columnId === action.toColumn).length || 0
-        const newCard = {...state.cards[action.cardId], columnId:action.toColumn, order: taregetOrder, updatedAt:action.updatedAt}
-        let _cards = {...state.cards, [action.cardId]:newCard}
-
-        const remaining = Object.values(_cards).filter((c) => c.columnId === originalColumnId).sort((a, b) => a.order - b.order)
-        remaining.forEach((r,idx) =>{
-                    const orderArrangedCard = {...r, order:idx}
-          _cards = {..._cards, [r.id]:orderArrangedCard}
-
-        })
-        return {...state, cards: _cards}
-      }
-    
-    }
-    case 'HYDRATE':
-      return { ...state, cards: action.cards }
-    default:
-      return state
-  }
-  
-}
+import { boardReducer, initialState } from './reducer/boardReducer'
+import { DroppableColumn } from './components/DroppableColumn'
 
 // ── 컬럼별 카드 골라 정렬 (함정 2 대응, 파생 데이터) ──────────
 function getCardsByColumn(state: BoardState, columnId: string): Card[] {
   return Object.values(state.cards)
     .filter((c) => c.columnId === columnId)
     .sort((a, b) => a.order - b.order)
-}
-
-// ── 드래그 가능한 카드 ──────────────────────────────────────
-function DraggableCard({ card }: { card: Card }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: card.id })
-  return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      style={{
-        padding: 12,
-        marginBottom: 8,
-        background: '#fff',
-        border: '1px solid #ddd',
-        borderRadius: 6,
-        cursor: 'grab',
-        opacity: isDragging ? 0.4 : 1,
-        transform: transform
-          ? `translate(${transform.x}px, ${transform.y}px)`
-          : undefined,
-      }}
-    >
-      {card.title}
-    </div>
-  )
-}
-
-// ── 드롭 가능한 컬럼 ────────────────────────────────────────
-function DroppableColumn({
-  columnId,
-  cards,
-}: {
-  columnId: string
-  cards: Card[]
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: columnId })
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        flex: 1,
-        minHeight: 300,
-        padding: 12,
-        background: isOver ? '#eef' : '#f4f4f4',
-        borderRadius: 8,
-      }}
-    >
-      <h3 style={{ marginTop: 0 }}>{columnId}</h3>
-      {cards.map((card) => (
-        <DraggableCard key={card.id} card={card} />
-      ))}
-    </div>
-  )
 }
 
 
@@ -183,6 +82,52 @@ function App() {
     
   }
 
+  const handleAddCard = async (columnId: string) => {
+  const id = crypto.randomUUID()              // 클라이언트에서 id 생성 (낙관적 추가의 핵심)
+  const now = Date.now()
+
+  // 맨 뒤 order = 최댓값 + 1000 (이동과 동일 규칙)
+  const columnCards = Object.values(state.cards).filter(c => c.columnId === columnId)
+  const order = (columnCards.length ? Math.max(...columnCards.map(c => c.order)) : 0) + 1000
+
+  const card: Card = { id, title: `새카드 ${columnCards.length+1}`, columnId, order, updatedAt: now }
+
+  // 1) 낙관적 + 전파
+  dispatch({ type: 'ADD_CARD', card })
+  channelRef.current?.send({ type: 'broadcast', event: 'card-added', payload: { card } })
+
+  // 2) DB 저장
+  const { error } = await supabase.from('cards').insert({
+    id, column_id: columnId, title: card.title, position: order, updated_at: now,
+  })
+
+  // 3) 실패 → 되돌림 (추가한 걸 도로 제거)
+  if (error) {
+    console.error('add failed', error)
+    dispatch({ type: 'REMOVE_CARD', cardId: id })
+    channelRef.current?.send({ type: 'broadcast', event: 'card-removed', payload: { cardId: id } })
+  }
+}
+
+const handleRemoveCard = async (cardId: string) => {
+  const card = state.cards[cardId]        // ← 되살리기용, 지우기 전에 확보
+  if (!card) return
+
+  // 1) 낙관적 제거 + 전파
+  dispatch({ type: 'REMOVE_CARD', cardId })
+  channelRef.current?.send({ type: 'broadcast', event: 'card-removed', payload: { cardId } })
+
+  // 2) DB 삭제
+  const { error } = await supabase.from('cards').delete().eq('id', cardId)
+
+  // 3) 실패 → 되살림 (확보해둔 card로 복원)
+  if (error) {
+    console.error('remove failed', error)
+    dispatch({ type: 'ADD_CARD', card })
+    channelRef.current?.send({ type: 'broadcast', event: 'card-added', payload: { card } })
+  }
+}
+
  useEffect(() => {
   let channel: RealtimeChannel | null = null
   let cancelled = false
@@ -203,6 +148,12 @@ function App() {
       .on('broadcast', { event: 'card-moved' }, (payload) => {
         const { cardId, toColumn, updatedAt, order } = payload.payload
         dispatch({ type: 'MOVE_CARD', cardId, toColumn, order, updatedAt })
+      })
+      .on('broadcast', { event: 'card-added' }, (payload) => {
+      dispatch({ type: 'ADD_CARD', card: payload.payload.card })
+      })
+      .on('broadcast', { event: 'card-removed' }, (payload) => {
+      dispatch({ type: 'REMOVE_CARD', cardId: payload.payload.cardId })
       })
       .subscribe((status) => {
         console.log('구독 상태:', status)
@@ -229,12 +180,18 @@ function App() {
     >
       <div style={{ display: 'flex', gap: 16, padding: 40 }}>
         {state.columnOrder.map((columnId) => (
+          
           <DroppableColumn
             key={columnId}
             columnId={columnId}
             cards={getCardsByColumn(state, columnId)}
+            onAddCard={handleAddCard}     
+            onRemove={handleRemoveCard}
           />
+          
         ))}
+
+        
       </div>
     </DndContext>
   )
