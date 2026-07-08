@@ -32,7 +32,8 @@ VITE_SUPABASE_KEY=your-anon-key
 - [x] 타임스탬프 LWW 충돌 처리 (오래된 이벤트 폐기)
 - [x] Supabase에서 카드 로드 (새로고침 후 유지)
 - [x] 카드 이동 DB 영속화 + 롤백
-- [ ] 카드 추가 / 삭제
+- [x] 카드 추가 / 삭제
+- [x] 파일 구조 분리 (reducer / components / hooks)
 - [ ] 컬럼 내 순서 변경
 - [ ] 배포
 
