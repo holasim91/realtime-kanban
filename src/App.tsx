@@ -27,8 +27,7 @@ const initialState: BoardState = {
 
 // ── reducer ─────────────────────────────────────────────────
 type Action = 
-  | { type: 'MOVE_CARD'; cardId: string; toColumn: string, updatedAt:number} 
-  |  { type: 'ROLLBACK'; prevState:BoardState }
+  | { type: 'MOVE_CARD'; cardId: string; toColumn: string, order:number,  updatedAt:number} 
    | { type: 'HYDRATE'; cards: Record<string, Card> }  
 
 function boardReducer(state: BoardState, action: Action): BoardState {
@@ -125,20 +124,6 @@ function DroppableColumn({
 
 
 
-
-function fakeSave() {
-  return new Promise<void>((resolve, reject) => {
-    setTimeout(() => {
-      if (Math.random() < 0.5) {
-        resolve()      // 성공
-      } else {
-        reject(new Error('save failed'))       // 실패
-      }
-    }, 500)
-  })
-}
-
-
 // ── 메인 ────────────────────────────────────────────────────
 function App() {
   const [state, dispatch] = useReducer(boardReducer, initialState)
@@ -146,34 +131,56 @@ function App() {
 
   const channelRef = useRef<RealtimeChannel | null>(null)
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async(event: DragEndEvent) => {
     const { active, over } = event
     if (!over) return // 컬럼 밖에 떨어뜨림
     const cardId = active.id as string
     const toColumn = over.id as string
-    const prevState = state // 옮기기 전 상태
+
+    const card = state.cards[cardId]
+    const originalColumn = card.columnId
+    const originalOrder = card.order          // 롤백 시 원위치 복원용
+    if (originalColumn === toColumn) return    // 같은 컬럼이면 무시 (재정렬은 스코프 2)
+
+
     const now = Date.now()
+
+    // 대상 컬럼 맨 뒤 order = 최댓값 + 간격 (문제 1 해결). 한 번만 계산.
+  const targetCards = Object.values(state.cards).filter(c => c.columnId === toColumn)
+  const newOrder = (targetCards.length ? Math.max(...targetCards.map(c => c.order)) : 0) + 1000
    
-    dispatch({ type: 'MOVE_CARD', cardId, toColumn, updatedAt:now })
+  // 1) 낙관적: 로컬 + 전파 (동일 order를 실어 보냄)
+  dispatch({ type: 'MOVE_CARD', cardId, toColumn, order: newOrder, updatedAt: now })
+  channelRef.current?.send({
+    type: 'broadcast', event: 'card-moved',
+    payload: { cardId, toColumn, order: newOrder, updatedAt: now },
+  })
+
+//   const error = await new Promise<{ message: string }>((resolve) => {
+//   setTimeout(() => resolve({ message: 'forced failure for testing' }), 3000)
+// })
+
+
+
+    // 2) DB에 한 행만 저장
+  const { error } = await supabase
+    .from('cards')
+    .update({ column_id: toColumn, position: newOrder, updated_at: now })
+    .eq('id', cardId)
+
+// 3) 실패 → 역방향 이동 (스냅샷 아님, 동시 이동 보존, 원위치 복원)
+  if (error) {
+    console.error('save failed', error)
+    const rollBackNow = Date.now()
+    dispatch({ type: 'MOVE_CARD', cardId, toColumn: originalColumn, order: originalOrder, updatedAt: rollBackNow })
     channelRef.current?.send({
-      type: 'broadcast',
-      event: 'card-moved',
-      payload: { cardId, toColumn, updatedAt:now },
-})
+      type: 'broadcast', event: 'card-moved',
+      payload: { cardId, toColumn: originalColumn, order: originalOrder, updatedAt: rollBackNow },
+    })
+  }
 
- fakeSave().catch((e)=>{
-      console.error(e)
-      const originalColumn = prevState.cards[cardId].columnId
-      const rollBackNow = Date.now()
-      channelRef.current?.send({
-      type: 'broadcast',
-      event: 'card-moved',
-      payload: { cardId, toColumn: originalColumn, updatedAt:rollBackNow  },
-})
-      dispatch({type:'ROLLBACK', prevState})
 
-    }
-    )
+    
   }
 
  useEffect(() => {
@@ -194,8 +201,8 @@ function App() {
     channel = supabase
       .channel('board-1')
       .on('broadcast', { event: 'card-moved' }, (payload) => {
-        const { cardId, toColumn, updatedAt } = payload.payload
-        dispatch({ type: 'MOVE_CARD', cardId, toColumn, updatedAt })
+        const { cardId, toColumn, updatedAt, order } = payload.payload
+        dispatch({ type: 'MOVE_CARD', cardId, toColumn, order, updatedAt })
       })
       .subscribe((status) => {
         console.log('구독 상태:', status)
