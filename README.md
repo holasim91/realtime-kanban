@@ -34,7 +34,7 @@ VITE_SUPABASE_KEY=your-anon-key
 - [x] 카드 이동 DB 영속화 + 롤백
 - [x] 카드 추가 / 삭제
 - [x] 파일 구조 분리 (reducer / components / hooks)
-- [ ] 컬럼 내 순서 변경
+- [x] 컬럼 내 순서 변경
 - [ ] 배포
 
 ## 설계 노트
