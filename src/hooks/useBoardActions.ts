@@ -83,26 +83,50 @@ export function useBoardActions(
       });
     }
   };
+
+function calcOrder(state: BoardState, toColumn: string, overCard: Card | undefined): number {
+  const columnCards = Object.values(state.cards)
+    .filter(c => c.columnId === toColumn)
+    .sort((a, b) => a.order - b.order)
+
+  // 경우 1: 카드가 아니라 컬럼에 떨어뜨림 → 맨 뒤
+  if (!overCard) {
+    return columnCards.length ? columnCards[columnCards.length - 1].order + 1000 : 1000
+  }
+
+  // 경우 2: overCard 앞자리
+  const overIdx = columnCards.findIndex(c => c.id === overCard.id)
+  const prevCard = columnCards[overIdx - 1]        // 앞 카드 (없으면 undefined)
+
+  // 경우 3: 맨 위 (앞 카드 없음)
+  if (!prevCard) return overCard.order - 1000
+
+  // 앞뒤 중간값 ← float 중간값의 본무대
+  return (prevCard.order + overCard.order) / 2
+}
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return; // 컬럼 밖에 떨어뜨림
+
     const cardId = active.id as string;
-    const toColumn = over.id as string;
+    const overId = over.id as string;
+    if (cardId === overId) return              // 자기 위에 떨어뜨림 → 무시
 
     const card = state.cards[cardId];
     const originalColumn = card.columnId;
     const originalOrder = card.order; // 롤백 시 원위치 복원용
-    if (originalColumn === toColumn) return; // 같은 컬럼이면 무시 (재정렬은 스코프 2)
+
+    const overCard = state.cards[overId]
+    const toColumn = overCard ? overCard.columnId : overId
+    const newOrder = calcOrder(state, toColumn, overCard)
+
+  // 컬럼도 같고 순서도 그대로면 무시
+  if (toColumn === originalColumn && newOrder === originalOrder) return
+    
 
     const now = Date.now();
 
-    // 대상 컬럼 맨 뒤 order = 최댓값 + 간격 (문제 1 해결). 한 번만 계산.
-    const targetCards = Object.values(state.cards).filter(
-      (c) => c.columnId === toColumn,
-    );
-    const newOrder =
-      (targetCards.length ? Math.max(...targetCards.map((c) => c.order)) : 0) +
-      1000;
 
     // 1) 낙관적: 로컬 + 전파 (동일 order를 실어 보냄)
     dispatch({
@@ -135,6 +159,7 @@ export function useBoardActions(
         order: originalOrder,
         updatedAt: rollBackNow,
       });
+      
       channelRef.current?.send({
         type: "broadcast",
         event: "card-moved",

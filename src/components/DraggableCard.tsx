@@ -1,10 +1,17 @@
-import { useDraggable } from "@dnd-kit/core";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import type { Card } from "../lib/type";
 
 
 export function DraggableCard({ card, onRemove }: { card: Card; onRemove: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
+  const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } =
     useDraggable({ id: card.id })
+    const { setNodeRef: setDropRef } = useDroppable({ id: card.id })
+
+     // ref 두 개를 하나의 노드에 연결
+  const setNodeRef = (node: HTMLElement | null) => {
+    setDragRef(node)
+    setDropRef(node)
+  }
   return (
     <div
       ref={setNodeRef}
