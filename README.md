@@ -35,9 +35,15 @@ VITE_SUPABASE_KEY=your-anon-key
 - [x] 카드 추가 / 삭제
 - [x] 파일 구조 분리 (reducer / components / hooks)
 - [x] 컬럼 내 순서 변경
-- [ ] 배포
+- [x] 배포
 
 ## 설계 노트
 
 (기능 확정 후 작성 예정 — 왜 broadcast + 수동 LWW인지,
 DB를 진실원으로 두고 broadcast를 최적화로 쓰는 구조 등)
+
+## 데모
+
+https://realtime-kanban-indol.vercel.app/
+
+두 개의 탭에서 열면 실시간 동기화를 확인할 수 있습니다.
