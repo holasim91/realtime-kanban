@@ -107,3 +107,5 @@ position을 정수가 아닌 실수(double precision)로 두고, 처음에 1000,
 https://realtime-kanban-indol.vercel.app/
 
 두 개의 탭에서 열면 실시간 동기화를 확인할 수 있습니다.
+
+*이 문서를 다른 언어로 읽기: [English](README.en.md)*
