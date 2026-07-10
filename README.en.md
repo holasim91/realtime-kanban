@@ -86,15 +86,17 @@ so no mitigation was added.
 
 ### 4. Limitations of client-timestamp LWW
 
-Conflicts are resolved with Last-Write-Wins. Each card carries `updatedAt` (epoch ms); an incoming event whose timestamp is not newer than the current value is judged stale and discarded.
+Conflicts are resolved with Last-Write-Wins. Each card carries updatedAt (epoch ms); an incoming event whose timestamp is not newer than the current value is judged stale and discarded.
 
-This approach has known limitations.
+This approach has several known limitations.
 
-**Clock skew** — Timestamps are generated on the client, so a client with a fast clock always wins. Server-authoritative timestamps would fix this, but they hand conflict resolution back to the server — which contradicts the reason broadcast was chosen in note #1.
+Clock skew — Timestamps are generated on the client, so a client with a fast clock always wins. Server-authoritative timestamps would fix this, but they hand conflict resolution back to the server — which contradicts the reason broadcast was chosen in note #1.
 
-**Not suitable for text editing** — For card position, it's fine for one side to win and the other to lose under LWW. But if two users edit the same text field concurrently, the loser's input disappears entirely. That territory calls for field-level locking or CRDTs, which is beyond the scope of this project. This is also why card-title editing was deliberately left out.
+LWW does not apply to DB writes — Conflict adjudication happens only in the client reducer. The update query targets rows by id alone, so an earlier request can still overwrite a later change that has already been saved. The screens converge via LWW, but the DB ends up holding whichever write arrived last. Preventing this would require a conditional update on the server that includes updated_at in the condition (optimistic locking) — but that, too, hands conflict adjudication over to the server.
 
-**Delete vs. move conflicts** — Timestamp comparison is not applied to deletions.
+Not suitable for text editing — For card position, it's fine for one side to win and the other to lose under LWW. But if two users edit the same text field concurrently, the loser's input disappears entirely. That territory calls for field-level locking or CRDTs, which is beyond the scope of this project. This is also why card-title editing was deliberately left out.
+
+Delete vs. move conflicts — Timestamp comparison is not applied to deletions.
 If one user deletes a card while another moves the same card, the deletion wins
 even if the move event happened later.
 (The reducer ignores move events for cards that no longer exist.)
@@ -102,7 +104,10 @@ Handling this strictly would require tombstones — keeping a deletion marker an
 comparing delete-time against move-time — which I judged to be outside this
 project's scope and did not implement.
 
-For the specific problem of moving cards, I concluded LWW is a reasonable fit.
+Most of these limitations are the price of placing conflict adjudication on the client.
+Moving to a server-authoritative model would resolve them — but it would also dissolve
+the very problem this project set out to explore.
+For the specific problem of moving cards, I concluded client-side LWW is a reasonable fit.
 
 ## Demo
 
